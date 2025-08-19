@@ -25,7 +25,6 @@ services:
       - MONITOR_DB_PATH=/data/kick_monitor.sqlite3
       - FDS_DB_PATH=/data/fds_bot.db
     volumes:
-      - ./web-dashboard:/app
       - data:/data
     depends_on:
       - monitor
