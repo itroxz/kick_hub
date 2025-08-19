@@ -7,10 +7,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const DB_PATH = path.join(__dirname, '..', 'fds_bot.db');
-const MONITOR_DB_PATH = path.join(__dirname, '..', 'kick_monitor.sqlite3');
+const DB_PATH = process.env.FDS_DB_PATH || path.join(__dirname, '..', 'fds_bot.db');
+const MONITOR_DB_PATH = process.env.MONITOR_DB_PATH || path.join(__dirname, '..', 'kick_monitor.sqlite3');
 
-const db = new sqlite3.Database(DB_PATH);
+const db = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) console.error('Erro abrindo fds DB:', err.message);
+});
 const monitorDb = new sqlite3.Database(MONITOR_DB_PATH, sqlite3.OPEN_READONLY, (err) => {
   if (err) console.error('Erro abrindo monitor DB:', err.message);
 });
