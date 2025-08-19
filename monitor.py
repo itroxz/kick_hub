@@ -159,8 +159,8 @@ def read_channels(path=CHANNELS_FILE):
 
     # Fallback: try fds_bot.db (shared DB used by the web dashboard)
     try:
-        other_db = os.path.join(os.path.dirname(__file__), "fds_bot.db")
-        if os.path.exists(other_db):
+        other_db = os.environ.get('FDS_DB_PATH') or FDS_DB_FALLBACK
+        if other_db and os.path.exists(other_db):
             conn = sqlite3.connect(other_db)
             cur = conn.cursor()
             cur.execute("SELECT name FROM channels ORDER BY name")
@@ -170,7 +170,7 @@ def read_channels(path=CHANNELS_FILE):
                 logging.info("Loaded %s channels from %s", len(rows), other_db)
                 return [r[0] for r in rows]
     except Exception:
-        logging.debug("Failed to read channels from fds_bot.db")
+        logging.debug("Failed to read channels from fds_bot.db at %s", other_db)
 
     # Final fallback: channels.txt
     if not os.path.exists(path):
