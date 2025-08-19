@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: fds_monitor
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web-dashboard
+      dockerfile: Dockerfile
+    container_name: fds_web
+    ports:
+      - "3034:3034"
+    environment:
+      - PORT=3034
+      - WEB_DASH_DEBUG=0
+    volumes:
+      - ./web-dashboard:/app
+      - ./:/app/..  # mount repo so sqlite at parent path is visible
+    depends_on:
+      - monitor
+    restart: unless-stopped

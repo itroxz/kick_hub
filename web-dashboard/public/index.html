@@ -1,0 +1,259 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>FDS Dashboard</title>
+  <style>body{padding:18px}</style>
+</head>
+<body>
+  <div class="container">
+    <h1>FDS - Dashboard (Node)</h1>
+    <p class="mb-3">API-backed CRUD de canais + visualização dos dados antigos (kick_monitor)</p>
+
+    <div class="card mb-3">
+      <div class="card-body" style="height:260px;padding:12px;">
+        <h5 class="card-title">Resumo consolidado (últimas 3 horas)</h5>
+        <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+          <label style="font-size:13px;margin-right:6px">Filtro mínimo:</label>
+          <input id="minViewers" type="number" min="0" value="10" style="width:80px" />
+          <label style="font-size:13px;margin-left:8px"><input id="applyMinFilter" type="checkbox" checked /> Aplicar filtro</label>
+        </div>
+        <div style="height:220px;">
+          <canvas id="liveTimeseriesChart" style="width:100%;height:100%;display:block"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="mainTabs">
+      <li class="nav-item"><a class="nav-link active" data-view="channels" href="#">Canais</a></li>
+      <li class="nav-item"><a class="nav-link" data-view="peaks" href="#">Peaks</a></li>
+      <li class="nav-item"><a class="nav-link" data-view="sessions" href="#">Sessions</a></li>
+      <li class="nav-item"><a class="nav-link" data-view="samples" href="#">Samples</a></li>
+    </ul>
+
+    <div id="view-channels">
+      <div class="mb-4">
+        <form id="addForm" class="row g-2">
+          <div class="col-auto" style="flex:1">
+            <input id="addName" class="form-control" placeholder="Novo canal" required>
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-success" type="submit">Adicionar</button>
+          </div>
+        </form>
+      </div>
+
+      <table class="table table-striped" id="tbl">
+        <thead><tr><th>id</th><th>Canal</th><th>Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="view-peaks" style="display:none">
+      <h4>Picos (peaks)</h4>
+      <p>Use o filtro abaixo para ver picos por canal.</p>
+      <div class="row mb-2">
+        <div class="col-sm-4"><input id="peakChannel" class="form-control" placeholder="Canal (opcional)"></div>
+        <div class="col-sm-2"><button id="btnFetchPeaks" class="btn btn-primary">Buscar</button></div>
+      </div>
+      <table class="table table-bordered" id="tblPeaks">
+        <thead><tr><th>Canal</th><th>Peak Overall</th><th>Peak Daily</th><th>Last Peak TS</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="view-sessions" style="display:none">
+      <h4>Sessions</h4>
+      <p>Lista de sessions (últimas iniciadas).</p>
+      <table class="table table-sm" id="tblSessions">
+        <thead><tr><th>ID</th><th>Canal</th><th>Start</th><th>End</th><th>Max</th><th>Avg</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="view-samples" style="display:none">
+      <h4>Samples</h4>
+      <div class="row mb-2">
+        <div class="col-sm-4"><input id="sampleChannel" class="form-control" placeholder="Canal (opcional)"></div>
+        <div class="col-sm-2"><button id="btnFetchSamples" class="btn btn-primary">Buscar</button></div>
+      </div>
+      <table class="table table-sm" id="tblSamples">
+        <thead><tr><th>ts</th><th>Canal</th><th>Viewers</th><th>is_live</th><th>session_id</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+function q(sel){return document.querySelector(sel)}
+async function fetchChannels(){
+  const res = await fetch('/api/channels');
+  const data = await res.json();
+  const tbody = document.querySelector('#tbl tbody');
+  tbody.innerHTML = '';
+  for(const r of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.id}</td>
+      <td><a href="/channel.html?channel=${encodeURIComponent(r.name)}">${r.name}</a></td>
+      <td>
+        <button class="btn btn-primary btn-sm btn-save" data-id="${r.id}">Salvar</button>
+        <button class="btn btn-danger btn-sm btn-del" data-id="${r.id}">Remover</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+  document.querySelectorAll('.btn-save').forEach(b=>b.onclick=async e=>{
+    const id = e.target.dataset.id;
+    const input = document.querySelector(`.name-input[data-id="${id}"]`);
+    const name = input.value.trim();
+    if(!name) return alert('Nome vazio');
+    const res = await fetch(`/api/channels/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({name})});
+    if(res.ok) fetchChannels(); else alert('Erro ao salvar');
+  });
+  document.querySelectorAll('.btn-del').forEach(b=>b.onclick=async e=>{
+    if(!confirm('Remover canal?')) return;
+    const id = e.target.dataset.id;
+    const res = await fetch(`/api/channels/${id}`,{method:'DELETE'});
+    if(res.ok) fetchChannels(); else alert('Erro ao remover');
+  });
+}
+
+document.getElementById('addForm').onsubmit = async (ev)=>{
+  ev.preventDefault();
+  const name = document.getElementById('addName').value.trim();
+  if(!name) return;
+  const res = await fetch('/api/channels',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name})});
+  if(res.ok){ document.getElementById('addName').value=''; fetchChannels(); } else { const j=await res.json(); alert(JSON.stringify(j)); }
+};
+
+fetchChannels();
+
+// tabs
+document.querySelectorAll('#mainTabs .nav-link').forEach(a=>a.addEventListener('click', (e)=>{
+  e.preventDefault();
+  document.querySelectorAll('#mainTabs .nav-link').forEach(x=>x.classList.remove('active'));
+  e.target.classList.add('active');
+  const view = e.target.dataset.view;
+  document.querySelectorAll('[id^="view-"]').forEach(v=>v.style.display='none');
+  document.getElementById('view-'+view).style.display='block';
+  if(view==='peaks') fetchPeaks();
+  if(view==='sessions') fetchSessions();
+  if(view==='samples') fetchSamples();
+}));
+
+async function fetchPeaks(){
+  const channel = document.getElementById('peakChannel').value.trim();
+  const url = channel? `/api/peaks?channel=${encodeURIComponent(channel)}` : '/api/peaks';
+  const res = await fetch(url);
+  const data = await res.json();
+  const tbody = document.querySelector('#tblPeaks tbody'); tbody.innerHTML='';
+  for(const r of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.channel}</td><td>${r.peak_overall||''}</td><td>${r.peak_daily||''}</td><td>${r.peak_overall_ts||''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function fetchSessions(){
+  const res = await fetch('/api/sessions');
+  const data = await res.json();
+  const tbody = document.querySelector('#tblSessions tbody'); tbody.innerHTML='';
+  for(const r of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.id}</td><td>${r.channel}</td><td>${r.start_ts||''}</td><td>${r.end_ts||''}</td><td>${r.max_viewers||''}</td><td>${r.avg_viewers||''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function fetchSamples(){
+  const channel = document.getElementById('sampleChannel').value.trim();
+  const url = channel? `/api/samples?channel=${encodeURIComponent(channel)}` : '/api/samples';
+  const res = await fetch(url);
+  const data = await res.json();
+  const tbody = document.querySelector('#tblSamples tbody'); tbody.innerHTML='';
+  for(const r of data){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.ts}</td><td>${r.channel}</td><td>${r.viewers}</td><td>${r.is_live}</td><td>${r.session_id||''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('btnFetchPeaks').onclick = (e)=>{ e.preventDefault(); fetchPeaks(); };
+document.getElementById('btnFetchSamples').onclick = (e)=>{ e.preventDefault(); fetchSamples(); };
+
+// live timeseries chart (multi-line)
+window.timeseriesChart = null;
+async function loadTimeseries(){
+  try{
+    const res = await fetch('/api/timeseries');
+    if(!res.ok) return;
+    const body = await res.json();
+    const labels = body.labels;
+    // apply min viewers filter if enabled
+    const minFilter = parseInt((q('#minViewers') && q('#minViewers').value) || '10', 10);
+    let rawDatasets = body.datasets || [];
+    if (q('#applyMinFilter') && q('#applyMinFilter').checked) {
+      rawDatasets = rawDatasets.filter(d => {
+        const maxv = (d.data || []).reduce((m, v) => Math.max(m, Number(v) || 0), 0);
+        return maxv >= minFilter;
+      });
+    }
+
+    const datasets = rawDatasets.map((d, idx) => ({
+      label: d.channel,
+      data: d.data,
+      borderColor: `hsl(${(idx*47)%360} 70% 40%)`,
+      backgroundColor: `hsla(${(idx*47)%360} 70% 40% / 0.2)`,
+      spanGaps: false,
+      tension: 0.2,
+      pointRadius: 0
+    }));
+
+    // consolidated dataset (sum across channels)
+    const consolidated = labels.map((_,i)=> datasets.reduce((s,ds)=> s + (Number(ds.data[i])||0), 0));
+    datasets.unshift({ label: 'Consolidado', data: consolidated, borderColor: 'black', backgroundColor: 'rgba(0,0,0,0.1)', borderWidth: 2, pointRadius: 0 });
+
+    const ctx = document.getElementById('liveTimeseriesChart');
+    if(!ctx) return;
+    if(window.timeseriesChart){
+      window.timeseriesChart.data.labels = labels;
+      window.timeseriesChart.data.datasets = datasets;
+      window.timeseriesChart.update();
+      return;
+    }
+    const ctx2 = ctx.getContext('2d');
+    window.timeseriesChart = new Chart(ctx2, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        stacked: false,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              title: (items)=> items[0]?.label,
+              footer: (items)=> {
+                const chart = items[0].chart;
+                const idx = items[0].dataIndex;
+                const total = chart.data.datasets.reduce((s,ds)=> s + (Number(ds.data[idx])||0), 0);
+                return 'Consolidado: ' + total;
+              }
+            }
+          }
+        },
+        scales: { x: { display: true }, y: { beginAtZero: true } },
+        maintainAspectRatio: false
+      }
+    });
+  }catch(e){ console.error('loadTimeseries', e); }
+}
+// reload when filter controls change
+q('#minViewers').addEventListener('input', ()=> loadTimeseries());
+q('#applyMinFilter').addEventListener('change', ()=> loadTimeseries());
+loadTimeseries(); setInterval(loadTimeseries, 30000);
+</script>
+</body>
+</html>

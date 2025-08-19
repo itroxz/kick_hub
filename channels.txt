@@ -1,0 +1,4 @@
+# Liste um slug de canal por linha (ex: xqc)
+xqc
+# adicione outros canais abaixo
+coringa

@@ -1,0 +1,210 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Canal - Dashboard</title>
+  <style>body{padding:18px}</style>
+</head>
+<body>
+  <div class="container">
+    <h1 id="hdr">Canal</h1>
+    <p><a href="/">Voltar</a></p>
+
+    <div class="row mb-3">
+      <div class="col-sm-4">
+        <label>Canal</label>
+        <input id="ch" class="form-control" readonly>
+      </div>
+      <div class="col-sm-4">
+        <label>Período</label>
+        <select id="sincePreset" class="form-control">
+          <option value="0">Últimas amostras</option>
+          <option value="3600">1 hora</option>
+          <option value="10800" selected>3 horas</option>
+          <option value="21600">6 horas</option>
+          <option value="43200">12 horas</option>
+          <option value="86400">1 dia</option>
+          <option value="604800">7 dias</option>
+          <option value="custom">Personalizado</option>
+        </select>
+        <input id="sinceCustom" class="form-control mt-2" placeholder="Horas (ex: 2)" style="display:none">
+        <div id="sinceLabel" style="font-size:12px;color:#666;margin-top:6px">Período: 3 horas</div>
+      </div>
+      <div class="col-sm-2 align-self-end">
+        <button id="btnLoad" class="btn btn-primary">Carregar</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-8">
+  <div id="channelStatus" class="mb-2"></div>
+        <div style="height:320px">
+          <canvas id="chartViewers" style="width:100%;height:100%"></canvas>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <h5>Resumo</h5>
+        <ul id="summary" class="list-group"></ul>
+      </div>
+    </div>
+
+    <h5 class="mt-4">Últimas amostras</h5>
+    <table class="table table-sm" id="tblSamples"></table>
+  </div>
+
+<script>
+function q(sel){return document.querySelector(sel)}
+const params = new URLSearchParams(location.search);
+const chan = params.get('channel');
+if(!chan){ document.body.innerHTML='<div class="container p-4">channel param missing. Use ?channel=name</div>'; }
+q('#ch').value = chan;
+q('#hdr').textContent = 'Canal: ' + chan;
+
+let chart;
+// show/hide custom input
+function updateSinceUI(){
+  const v = q('#sincePreset').value;
+  const labelText = q('#sincePreset').selectedOptions[0].textContent || '';
+  q('#sinceLabel').textContent = 'Período: ' + labelText;
+  if(v === 'custom'){
+    q('#sinceCustom').style.display = '';
+  } else {
+    q('#sinceCustom').style.display = 'none';
+    q('#sinceCustom').value = '';
+  }
+}
+q('#sincePreset').addEventListener('change', updateSinceUI);
+// initialize UI to default
+updateSinceUI();
+
+async function loadData(){
+  // compute since in seconds from preset or custom hours
+  let sinceSec = 0;
+  const preset = q('#sincePreset').value;
+  if(preset === 'custom'){
+    const h = parseFloat(q('#sinceCustom').value || '0');
+    if(h>0) sinceSec = Math.floor(h*3600);
+  } else {
+    sinceSec = parseInt(preset || '0',10);
+  }
+  const sinceTs = sinceSec>0? Math.floor(Date.now()/1000)-sinceSec : 0;
+  const metricsRes = await fetch(`/api/channel/metrics?channel=${encodeURIComponent(chan)}${sinceTs?('&since='+sinceTs):''}`);
+  const metrics = await metricsRes.json();
+  q('#summary').innerHTML = '';
+  q('#summary').innerHTML += `<li class="list-group-item">Samples: ${metrics.samples.count}</li>`;
+  q('#summary').innerHTML += `<li class="list-group-item">Avg viewers: ${Math.round(metrics.samples.avg_viewers||0)}</li>`;
+  q('#summary').innerHTML += `<li class="list-group-item">Max viewers: ${metrics.samples.max_viewers||0}</li>`;
+  q('#summary').innerHTML += `<li class="list-group-item">Sessions: ${metrics.sessions_count}</li>`;
+
+  // fetch raw samples for chart
+  const sUrl = sinceTs? `/api/samples?channel=${encodeURIComponent(chan)}&since=${sinceTs}&limit=10000` : `/api/samples?channel=${encodeURIComponent(chan)}&limit=500`;
+  const samplesRes = await fetch(sUrl);
+  const samples = await samplesRes.json();
+  // debug output in console
+  console.debug('[channel] requested', sUrl, 'returned', Array.isArray(samples)?samples.length:typeof samples);
+
+  // Build uniform time axis so missing buckets are explicit (Chart.js shows gaps for `null` values)
+  // resolution in seconds (use 60s by default, can be adjusted)
+  const resolution = 60;
+  const canvas = q('#chartViewers');
+  if(!samples || samples.length === 0){
+    // check meta to show helpful message
+    try{
+      const metaRes = await fetch(`/api/samples/meta?channel=${encodeURIComponent(chan)}`);
+      if(metaRes.ok){
+        const meta = await metaRes.json();
+        if(meta.cnt===0){
+          q('#channelStatus').innerHTML = `<div class="alert alert-warning">Nenhuma amostra encontrada para este canal no banco de dados.</div>`;
+        } else {
+          q('#channelStatus').innerHTML = `<div class="alert alert-info">Existem ${meta.cnt} amostras no DB (ultima: ${new Date(meta.max_ts*1000).toLocaleString()}). O período selecionado pode não conter dados.</div>`;
+        }
+      }
+    }catch(e){ console.debug('meta fetch failed', e); }
+    // no samples -> show empty chart area
+    if(chart){ chart.destroy(); chart = null; }
+    canvas.style.display = 'none';
+    // clear samples table
+    q('#tblSamples').innerHTML = '<thead><tr><th>ts</th><th>Canal</th><th>Viewers</th><th>is_live</th><th>session_id</th></tr></thead><tbody></tbody>';
+    return;
+  }
+
+  // normalize samples to ascending by timestamp (robust regardless of server ordering)
+  samples.sort((a,b) => (a.ts||0) - (b.ts||0));
+  // determine time window
+  const minTs = samples[0].ts;
+  const maxTs = samples[samples.length-1].ts;
+  // debug: first/last sample after sort
+  console.debug('[channel] first_ts, last_ts after sort', minTs, maxTs);
+  const startBucket = Math.floor(minTs / resolution) * resolution;
+  const endBucket = Math.ceil(maxTs / resolution) * resolution;
+  const buckets = [];
+  for(let t = startBucket; t <= endBucket; t += resolution){ buckets.push(t); }
+
+  // map samples into buckets (take last sample in bucket)
+  const map = new Map();
+  for(const s of samples){
+    const b = Math.floor(s.ts / resolution) * resolution;
+    map.set(b, s); // overwrite to keep most recent in bucket
+  }
+
+  const labels = buckets.map(b => new Date(b*1000).toLocaleString());
+  const data = buckets.map(b => {
+    const s = map.get(b);
+    if(!s) return null; // gap: no data for this bucket
+    // if sample exists but not live, mark as 0 to indicate offline
+    return (s.is_live && Number(s.is_live) > 0) ? s.viewers : 0;
+  });
+
+  // extra debug details
+  const nonNull = data.filter(d=>d!==null).length;
+  const previewLabels = labels.slice(0,10).join(', ');
+  const previewData = data.slice(0,10).map(d=>d===null? 'null': d).join(', ');
+  const dbgEl = q('#channelDebug');
+  if (dbgEl) dbgEl.textContent += ` | min:${minTs} max:${maxTs} buckets:${buckets.length} labels:${labels.length} nonNull:${nonNull} previewLabels:[${previewLabels}] previewData:[${previewData}]`;
+  console.debug('[channel-debug] min,max,buckets,nonNull', minTs, maxTs, buckets.length, nonNull);
+
+  // determine if there's any real data (non-null)
+  const hasData = data.some(d => d !== null);
+  if(!hasData){
+    if(chart){ chart.destroy(); chart = null; }
+    canvas.style.display = 'none';
+  } else {
+    canvas.style.display = '';
+    try{
+      if(chart) {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = data;
+        chart.update();
+      } else {
+        const ctx = canvas.getContext('2d');
+        chart = new Chart(ctx, {
+          type: 'line',
+          data: { labels, datasets:[{label:'viewers', data, borderColor:'blue', fill:false, tension:0.2, spanGaps:false}] },
+          options:{
+            scales:{ x:{ type: 'category', title: { display: true, text: 'Time' } }, y:{ beginAtZero: true, title: { display: true, text: 'Viewers' } } },
+            plugins:{ legend: { display: false } },
+            maintainAspectRatio: false,
+            elements: { line: { spanGaps: false } }
+          }
+        });
+      }
+    }catch(err){
+  console.error('Chart render error', err);
+  if (dbgEl) dbgEl.textContent += ' | ChartError: '+(err && err.message);
+    }
+  }
+
+  // populate samples table
+  const tbl = q('#tblSamples');
+  tbl.innerHTML = '<thead><tr><th>ts</th><th>viewers</th><th>is_live</th><th>session_id</th></tr></thead><tbody>' + samples.slice(0,200).map(s=>`<tr><td>${new Date(s.ts*1000).toLocaleString()}</td><td>${s.viewers}</td><td>${s.is_live}</td><td>${s.session_id||''}</td></tr>`).join('') + '</tbody>';
+}
+
+q('#btnLoad').onclick = ()=> loadData();
+// auto-load
+loadData();
+</script>
+</body>
+</html>

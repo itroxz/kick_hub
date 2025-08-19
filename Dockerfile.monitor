@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+# small utilities
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# copy project (in compose we mount the folder so build mainly captures files)
+COPY . /app
+
+ENV PYTHONUNBUFFERED=1
+
+# default command runs the supervisor which starts the monitor workers
+CMD ["python", "run_supervisor.py"]
