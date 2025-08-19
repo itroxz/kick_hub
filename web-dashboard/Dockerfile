@@ -2,11 +2,11 @@ FROM node:18-alpine
 WORKDIR /app
 
 # install deps
-COPY web-dashboard/package.json web-dashboard/package-lock.json* ./
+COPY package.json package-lock.json* ./
 RUN npm ci --silent || npm install --silent
 
-# copy app
-COPY web-dashboard/ /app/
+# copy app (build context is ./web-dashboard)
+COPY . /app/
 
 EXPOSE 3034
 
