@@ -5,8 +5,6 @@ services:
       context: .
       dockerfile: Dockerfile.monitor
     container_name: fds_monitor
-    volumes:
-      - ./:/app
     restart: unless-stopped
 
   web:
