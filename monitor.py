@@ -20,8 +20,12 @@ import sys
 import logging
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "kick_monitor.sqlite3")
-CHANNELS_FILE = os.path.join(os.path.dirname(__file__), "channels.txt")
+# Allow overriding DB paths via environment (useful in containers)
+DB_PATH = os.environ.get('MONITOR_DB_PATH') or os.path.join(os.path.dirname(__file__), "kick_monitor.sqlite3")
+# channels.txt fallback path
+CHANNELS_FILE = os.environ.get('CHANNELS_FILE') or os.path.join(os.path.dirname(__file__), "channels.txt")
+# fallback path for the web/dashboard DB used to store channels
+FDS_DB_FALLBACK = os.environ.get('FDS_DB_PATH') or os.path.join(os.path.dirname(__file__), "fds_bot.db")
 POLL_INTERVAL = 30  # segundos
 SUPERVISOR_INTERVAL = 5  # segundos, checa status dos workers
 RECONCILE_INTERVAL = 60  # segundos entre runs do reconciler

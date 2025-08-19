@@ -5,6 +5,11 @@ services:
       context: .
       dockerfile: Dockerfile.monitor
     container_name: fds_monitor
+    environment:
+      - MONITOR_DB_PATH=/data/kick_monitor.sqlite3
+      - CHANNELS_FILE=/data/channels.txt
+    volumes:
+      - data:/data
     restart: unless-stopped
 
   web:
@@ -17,11 +22,13 @@ services:
     environment:
       - PORT=3034
       - WEB_DASH_DEBUG=0
-      - MONITOR_DB_PATH=/repo/kick_monitor.sqlite3
-      - FDS_DB_PATH=/repo/fds_bot.db
+      - MONITOR_DB_PATH=/data/kick_monitor.sqlite3
+      - FDS_DB_PATH=/data/fds_bot.db
     volumes:
       - ./web-dashboard:/app
-      - ./:/repo  # mount repo at /repo so sqlite files are accessible
+      - data:/data
     depends_on:
       - monitor
     restart: unless-stopped
+volumes:
+  data:
