@@ -159,18 +159,28 @@ def read_channels(path=CHANNELS_FILE):
 
     # Fallback: try fds_bot.db (shared DB used by the web dashboard)
     try:
-        other_db = os.environ.get('FDS_DB_PATH') or FDS_DB_FALLBACK
-        if other_db and os.path.exists(other_db):
-            conn = sqlite3.connect(other_db)
-            cur = conn.cursor()
-            cur.execute("SELECT name FROM channels ORDER BY name")
-            rows = cur.fetchall()
-            conn.close()
-            if rows:
-                logging.info("Loaded %s channels from %s", len(rows), other_db)
-                return [r[0] for r in rows]
+        # prefer explicit env, then data volume, then app-local DB
+        env_db = os.environ.get('FDS_DB_PATH')
+        candidates = []
+        if env_db:
+            candidates.append(env_db)
+        candidates.append('/data/fds_bot.db')
+        candidates.append(os.path.join(os.path.dirname(__file__), 'fds_bot.db'))
+        for other_db in candidates:
+            try:
+                if other_db and os.path.exists(other_db):
+                    conn = sqlite3.connect(other_db)
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM channels ORDER BY name")
+                    rows = cur.fetchall()
+                    conn.close()
+                    if rows:
+                        logging.info("Loaded %s channels from %s", len(rows), other_db)
+                        return [r[0] for r in rows]
+            except Exception:
+                logging.debug("Failed to read channels from %s", other_db)
     except Exception:
-        logging.debug("Failed to read channels from fds_bot.db at %s", other_db)
+        logging.exception("Unexpected error while reading channels from fds_bot DB candidates")
 
     # Final fallback: channels.txt
     if not os.path.exists(path):
