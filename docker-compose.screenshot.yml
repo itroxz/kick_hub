@@ -11,5 +11,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  kick_monitor_data:
-    external: true
+  kick_monitor_data: {}
