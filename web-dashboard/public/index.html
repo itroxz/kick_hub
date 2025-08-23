@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <title>FDS Dashboard</title>
+  <title>Kick Monitor - BMS</title>
   <style>body{padding:18px}</style>
 </head>
 <body>
   <div class="container">
-    <h1>FDS - Dashboard (Node)</h1>
-    <p class="mb-3">API-backed CRUD de canais + visualização dos dados antigos (kick_monitor)</p>
+  <h1>Kick Monitor - BMS</h1>
+  <p class="mb-3">API-backed CRUD de canais + visualização dos dados antigos (kick_monitor)</p>
 
     <div class="card mb-3">
       <div class="card-body" style="height:260px;padding:12px;">
@@ -212,9 +212,9 @@ async function loadTimeseries(){
       pointRadius: 0
     }));
 
-    // consolidated dataset (sum across channels)
-    const consolidated = labels.map((_,i)=> datasets.reduce((s,ds)=> s + (Number(ds.data[i])||0), 0));
-    datasets.unshift({ label: 'Consolidado', data: consolidated, borderColor: 'black', backgroundColor: 'rgba(0,0,0,0.1)', borderWidth: 2, pointRadius: 0 });
+  // consolidated dataset (sum across channels) - keep calculation for tooltip only
+  const consolidated = labels.map((_,i)=> datasets.reduce((s,ds)=> s + (Number(ds.data[i])||0), 0));
+  // NOTE: we intentionally do not add a visible 'Consolidado' dataset to avoid cluttering the chart.
 
     const ctx = document.getElementById('liveTimeseriesChart');
     if(!ctx) return;
