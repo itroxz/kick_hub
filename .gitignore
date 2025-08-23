@@ -19,3 +19,5 @@ Thumbs.db
 
 # Others
 *.egg-info/
+fds_bot.db
+kick_monitor.sqlite3
