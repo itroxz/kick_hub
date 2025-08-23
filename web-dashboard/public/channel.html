@@ -47,7 +47,8 @@
       </div>
       <div class="col-md-4">
         <h5>Resumo</h5>
-        <ul id="summary" class="list-group"></ul>
+      <div id="trendBadge" style="margin-bottom:8px"></div>
+      <ul id="summary" class="list-group"></ul>
       </div>
     </div>
 
@@ -94,6 +95,19 @@ async function loadData(){
   const metricsRes = await fetch(`/api/channel/metrics?channel=${encodeURIComponent(chan)}${sinceTs?('&since='+sinceTs):''}`);
   const metrics = await metricsRes.json();
   q('#summary').innerHTML = '';
+  // fetch trend metrics (last 10 minutes by default)
+  try{
+    const tRes = await fetch(`/api/streamer/metrics?channel=${encodeURIComponent(chan)}&minutes=10`);
+    const tm = await tRes.json();
+    if(!tm.error){
+      const arrow = tm.pct_change>0 ? '▲' : (tm.pct_change<0 ? '▼' : '─');
+      const pct = isFinite(tm.pct_change)? tm.pct_change.toFixed(1)+'%': 'n/a';
+      const slope = tm.slope_per_min? tm.slope_per_min.toFixed(2)+'/min' : '0.00/min';
+      q('#trendBadge').innerHTML = `<div class="badge bg-light text-dark">Tendência: ${arrow} ${pct} (slope ${slope})</div>`;
+    } else {
+      q('#trendBadge').innerHTML = '';
+    }
+  }catch(e){ console.debug('trend fetch failed', e); }
   q('#summary').innerHTML += `<li class="list-group-item">Samples: ${metrics.samples.count}</li>`;
   q('#summary').innerHTML += `<li class="list-group-item">Avg viewers: ${Math.round(metrics.samples.avg_viewers||0)}</li>`;
   q('#summary').innerHTML += `<li class="list-group-item">Max viewers: ${metrics.samples.max_viewers||0}</li>`;

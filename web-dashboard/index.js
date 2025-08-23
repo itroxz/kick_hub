@@ -243,6 +243,59 @@ app.get('/api/channel/metrics', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// streamer trend metrics endpoint
+app.get('/api/streamer/metrics', async (req, res) => {
+  try {
+    const channel = req.query.channel;
+    const minutes = parseInt(req.query.minutes || '10', 10);
+    if (!channel) return res.status(400).json({ error: 'channel required' });
+
+    // find latest ts for channel
+    const rows = await allAsync(monitorDb, 'SELECT MAX(ts) as maxts FROM samples WHERE channel=?', [channel]);
+    const maxts = rows && rows[0] ? rows[0].maxts : null;
+    if (!maxts) return res.json({ channel, error: 'no samples' });
+    const latest = Number(maxts);
+    const window = minutes * 60;
+    const recent_since = latest - window;
+    const prev_since = recent_since - window;
+    const prev_until = recent_since - 1;
+
+    const recent = await allAsync(monitorDb, 'SELECT ts, viewers, is_live FROM samples WHERE channel=? AND ts>=? AND ts<=? ORDER BY ts ASC', [channel, recent_since, latest]);
+    const prev = await allAsync(monitorDb, 'SELECT ts, viewers, is_live FROM samples WHERE channel=? AND ts>=? AND ts<=? ORDER BY ts ASC', [channel, prev_since, prev_until]);
+
+    function avgPeak(rows){
+      const vs = rows.map(r=>Number(r.viewers)||0).filter(x=>x>=0);
+      if (!vs.length) return {avg:0, peak:0, median:0, sd:0};
+      const avg = vs.reduce((a,b)=>a+b,0)/vs.length;
+      const peak = Math.max(...vs);
+      vs.sort((a,b)=>a-b);
+      const median = vs[Math.floor(vs.length/2)];
+      const sd = vs.length>1? Math.sqrt(vs.map(x=>Math.pow(x-avg,2)).reduce((a,b)=>a+b,0)/(vs.length-1)):0;
+      return {avg, peak, median, sd};
+    }
+
+    function slopePerMin(rows){
+      if (rows.length<2) return 0;
+      const xs = rows.map(r=>(r.ts - rows[0].ts)/60.0);
+      const ys = rows.map(r=>Number(r.viewers)||0);
+      const meanX = xs.reduce((a,b)=>a+b,0)/xs.length;
+      const meanY = ys.reduce((a,b)=>a+b,0)/ys.length;
+      const num = xs.map((x,i)=> (x-meanX)*(ys[i]-meanY)).reduce((a,b)=>a+b,0);
+      const den = xs.map(x=>Math.pow(x-meanX,2)).reduce((a,b)=>a+b,0);
+      if (den===0) return 0;
+      return num/den;
+    }
+
+    const recentAgg = avgPeak(recent);
+    const prevAgg = avgPeak(prev);
+    const pct = prevAgg.avg===0 ? (recentAgg.avg>0? 100 : 0) : (recentAgg.avg - prevAgg.avg)/prevAgg.avg*100;
+    const slope = slopePerMin(recent);
+    const uptime = recent.length? (recent.filter(r=>Number(r.is_live)).length / recent.length) : 0;
+
+    res.json({ channel, minutes, latest, recent_count: recent.length, recent_avg: recentAgg.avg, recent_peak: recentAgg.peak, prev_count: prev.length, prev_avg: prevAgg.avg, pct_change: pct, slope_per_min: slope, uptime_ratio: uptime });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
