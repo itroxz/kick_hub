@@ -34,8 +34,28 @@ STALE_MINUTES = 10  # minutos de inatividade para considerar uma session encerra
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def get_conn(path=DB_PATH, timeout=30):
+    """Create a sqlite3 connection with sensible defaults for concurrent access.
+
+    - sets a timeout so writers wait for locks instead of failing immediately
+    - disables the same-thread check so connections can be used across threads if necessary
+    - applies recommended PRAGMA settings (WAL, synchronous=NORMAL, temp_store=MEMORY)
+    """
+    conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
+    try:
+        cur = conn.cursor()
+        # keep these PRAGMAs idempotent; if they fail, ignore
+        cur.execute("PRAGMA journal_mode=WAL;")
+        cur.execute("PRAGMA synchronous=NORMAL;")
+        cur.execute("PRAGMA temp_store=MEMORY;")
+    except Exception:
+        # best-effort only
+        pass
+    return conn
+
+
 def init_db(path=DB_PATH):
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
 
     # Create base tables if they don't exist
@@ -146,7 +166,7 @@ def init_db(path=DB_PATH):
 def read_channels(path=CHANNELS_FILE):
     # Try reading channels from kick_monitor.sqlite3 (channels table)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn(DB_PATH)
         cur = conn.cursor()
         cur.execute("SELECT name FROM channels ORDER BY name")
         rows = cur.fetchall()
@@ -168,9 +188,9 @@ def read_channels(path=CHANNELS_FILE):
         candidates.append(os.path.join(os.path.dirname(__file__), 'fds_bot.db'))
         for other_db in candidates:
             try:
-                if other_db and os.path.exists(other_db):
-                    conn = sqlite3.connect(other_db)
-                    cur = conn.cursor()
+                    if other_db and os.path.exists(other_db):
+                        conn = get_conn(other_db)
+                        cur = conn.cursor()
                     cur.execute("SELECT name FROM channels ORDER BY name")
                     rows = cur.fetchall()
                     conn.close()
@@ -221,7 +241,7 @@ def fetch_channel(channel):
 
 def save_sample(channel, viewers, is_live, raw_json, session_id=None, path=DB_PATH):
     ts = int(time.time())
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     # serializar JSON de forma segura
     try:
@@ -276,7 +296,7 @@ from datetime import timedelta
 
 
 def update_peaks(channel, ts, viewers, path=DB_PATH):
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     cur.execute("SELECT peak_overall, peak_daily, peak_daily_date, peak_weekly, peak_week_start, peak_monthly, peak_month FROM peaks WHERE channel = ?", (channel,))
     row = cur.fetchone()
@@ -320,7 +340,7 @@ def update_peaks(channel, ts, viewers, path=DB_PATH):
 
 
 def _get_open_session(channel, path=DB_PATH):
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     cur.execute("SELECT id, livestream_id FROM sessions WHERE channel = ? AND end_ts IS NULL ORDER BY start_ts DESC LIMIT 1", (channel,))
     r = cur.fetchone()
@@ -331,7 +351,7 @@ def _get_open_session(channel, path=DB_PATH):
 
 
 def _create_session(channel, livestream_id, title, start_ts, path=DB_PATH):
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     cur.execute("INSERT INTO sessions (channel, livestream_id, title, start_ts) VALUES (?, ?, ?, ?)", (channel, livestream_id, title, start_ts))
     sid = cur.lastrowid
@@ -343,7 +363,7 @@ def _create_session(channel, livestream_id, title, start_ts, path=DB_PATH):
 
 def _close_session(session_id, end_ts, path=DB_PATH):
     # atualiza end_ts e calcula métricas a partir de samples
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     cur.execute("UPDATE sessions SET end_ts = ? WHERE id = ?", (end_ts, session_id))
     # compute metrics
@@ -509,7 +529,7 @@ def one_shot(channels):
 def reconcile_sessions(path=DB_PATH):
     """Fechar sessions que estão abertas mas não receberam samples nos últimos STALE_MINUTES."""
     cutoff = int(time.time()) - STALE_MINUTES * 60
-    conn = sqlite3.connect(path)
+    conn = get_conn(path)
     cur = conn.cursor()
     # encontrar sessions abertas
     cur.execute("SELECT id, channel, start_ts FROM sessions WHERE end_ts IS NULL")
