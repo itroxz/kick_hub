@@ -1,0 +1,14 @@
+{
+  "name": "screenshot-worker",
+  "version": "1.0.0",
+  "description": "Periodic screenshot worker using Puppeteer",
+  "main": "capture.js",
+  "scripts": {
+    "start": "node capture.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^8.4.0",
+    "puppeteer": "^21.0.0",
+    "yargs": "^17.0.1"
+  }
+}

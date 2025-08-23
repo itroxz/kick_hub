@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  screenshot-worker:
+    build: ./screenshot-worker
+    environment:
+      - SCREENSHOT_DIR=/data/screenshots
+      - INTERVAL_SECONDS=300
+      - CHANNELS=${CHANNELS}
+    volumes:
+      - kick_monitor_data:/data
+    restart: unless-stopped
+
+volumes:
+  kick_monitor_data:
+    external: true
