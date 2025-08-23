@@ -17,6 +17,10 @@ const monitorDb = new sqlite3.Database(MONITOR_DB_PATH, sqlite3.OPEN_READONLY, (
   if (err) console.error('Erro abrindo monitor DB:', err.message);
 });
 const DEBUG = process.env.WEB_DASH_DEBUG === '1';
+const fs = require('fs');
+
+const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR || path.join('/', 'data', 'screenshots');
+const SCREENSHOT_DB_PATH = path.join(SCREENSHOT_DIR, 'screenshots.db');
 
 function runAsync(dbInstance, sql, params=[]) {
   return new Promise((resolve, reject) => {
@@ -298,6 +302,43 @@ app.get('/api/streamer/metrics', async (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// Serve screenshots metadata from the screenshot worker volume
+app.get('/screenshots', async (req, res) => {
+  try {
+    // prefer the screenshots DB if present
+    if (fs.existsSync(SCREENSHOT_DB_PATH)) {
+      const sdb = new sqlite3.Database(SCREENSHOT_DB_PATH, sqlite3.OPEN_READONLY);
+      sdb.all('SELECT id, channel, path, ts, width, height, status FROM screenshots ORDER BY ts DESC LIMIT 500', [], (err, rows) => {
+        sdb.close();
+        if (err) return res.status(500).json({ error: err.message });
+        // map path to URL under /screenshots/files
+        const mapped = rows.map(r => ({ ...r, url: `/screenshots/files/${encodeURIComponent(path.basename(r.path))}` }));
+        res.json(mapped);
+      });
+      return;
+    }
+
+    // fallback: list files from directory
+    if (!fs.existsSync(SCREENSHOT_DIR)) return res.json([]);
+    const files = fs.readdirSync(SCREENSHOT_DIR).filter(f => f.match(/\.jpe?g$|\.png$/i)).sort().reverse();
+    const mapped = files.slice(0,500).map(f => ({ file: f, url: `/screenshots/files/${encodeURIComponent(f)}` }));
+    res.json(mapped);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// static serve the screenshots files from the mounted volume (if available)
+if (fs.existsSync(SCREENSHOT_DIR)) {
+  app.use('/screenshots/files', express.static(SCREENSHOT_DIR, { index: false, dotfiles: 'ignore' }));
+} else {
+  // create route that attempts to serve from /data/screenshots by resolving at request time
+  app.use('/screenshots/files', (req, res, next) => {
+    const file = decodeURIComponent(req.path.replace(/^\//, ''));
+    const full = path.join(SCREENSHOT_DIR, file);
+    if (fs.existsSync(full)) return res.sendFile(full);
+    res.status(404).end();
+  });
+}
 
 const port = process.env.PORT || 3000;
 const host = process.env.HOST || '0.0.0.0';
